@@ -610,11 +610,26 @@ struct LibtorrentStreamBridge::Impl {
             if (!payload.has_value()) {
                 payload.emplace(route.payload_path);
             }
-            buffer.resize(static_cast<std::size_t>(unverified_end - cursor));
+            const auto next_block_boundary = ((cursor / block_bytes) + 1) * block_bytes;
+            const auto step_end = std::min(unverified_end, next_block_boundary);
+            buffer.resize(static_cast<std::size_t>(step_end - cursor));
             const auto absolute = slice.piece_start + cursor;
             if (absolute < route.file_offset ||
                 !payload->read_exact(absolute - route.file_offset, buffer)) {
                 payload_readable = false;
+                continue;
+            }
+            if (std::ranges::all_of(buffer, [](const char b) { return b == 0; })) {
+                std::unique_lock lock(waiter->mutex);
+                waiter->ready.wait_for(lock, std::chrono::milliseconds(5), [&] {
+                    return waiter->done || token.stop_requested() ||
+                        demand_state->cancelled.load();
+                });
+                if (token.stop_requested() || demand_state->cancelled.load() ||
+                    std::chrono::steady_clock::now() >= deadline) {
+                    abandon();
+                    return false;
+                }
                 continue;
             }
             if (!writer(buffer)) {
@@ -622,7 +637,7 @@ struct LibtorrentStreamBridge::Impl {
                 return false;
             }
             add_delivered_bytes(route.counters, static_cast<std::uint64_t>(buffer.size()));
-            cursor = unverified_end;
+            cursor = step_end;
             deadline = std::chrono::steady_clock::now() + piece_wait_timeout;
         }
         abandon();

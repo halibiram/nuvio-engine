@@ -25,6 +25,7 @@ add_executable(
     ${PROJECT_SOURCE_DIR}/src/scheduler/stream_demand_plan.cpp
     random_bytes_test.cpp
     ${PROJECT_SOURCE_DIR}/src/security/random_bytes.cpp
+    keyframe_unverified_corruption_test.cpp
 )
 
 target_link_libraries(nuvio_engine_tests PRIVATE Nuvio::Engine)
